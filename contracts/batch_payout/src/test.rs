@@ -139,9 +139,11 @@ fn execute_emits_the_total_and_recipient_count() {
         count: 2,
         total: 1_000,
     };
+    let all = f.env.events().all();
+    let events = all.events();
     assert_eq!(
-        f.env.events().all().last().unwrap(),
-        expected.to_xdr(&f.env, &f.client.address)
+        events.last().expect("no events emitted"),
+        &expected.to_xdr(&f.env, &f.client.address)
     );
 }
 
@@ -322,6 +324,72 @@ fn paying_the_same_address_twice_is_allowed() {
     let receipt = f.client.execute(&f.funder, &f.token.address, &batch);
     assert_eq!(receipt.total, 150);
     assert_eq!(f.token.balance(&a), 150);
+}
+
+/// Issue #479: pins the behaviour left by removing duplicate detection.
+///
+/// Error 102 was `BatchDuplicateRecipient`; it was removed before release
+/// (see the "What is absent, and why" note in `errors.rs` and the reserved
+/// slot in `sororail_common::errors`) because an on-chain duplicate check
+/// costs a quadratic scan and paying one address twice is legitimate. The
+/// consequence is that both transfers occur: the recipient receives the sum
+/// and the receipt counts each line separately.
+#[test]
+fn duplicate_recipients_are_each_paid_and_counted_in_the_receipt() {
+    let f = Fixture::new();
+    let dup = Address::generate(&f.env);
+    let other = Address::generate(&f.env);
+    let batch = vec![
+        &f.env,
+        Payment {
+            to: dup.clone(),
+            amount: 100,
+        },
+        Payment {
+            to: other.clone(),
+            amount: 25,
+        },
+        Payment {
+            to: dup.clone(),
+            amount: 50,
+        },
+    ];
+
+    let receipt = f.client.execute(&f.funder, &f.token.address, &batch);
+    assert_eq!(
+        receipt,
+        Receipt {
+            count: 3,
+            total: 175
+        }
+    );
+    // Both lines for the duplicate address arrived, summed.
+    assert_eq!(f.token.balance(&dup), 150);
+    assert_eq!(f.token.balance(&other), 25);
+    assert_eq!(f.token.balance(&f.funder), MINT - 175);
+    assert_eq!(f.token.balance(&f.client.address), 0);
+}
+
+/// Same as above for `execute_equal`: the same address listed twice is paid
+/// twice and counted twice (no `BatchDuplicateRecipient`, see error 102).
+#[test]
+fn execute_equal_pays_a_duplicate_recipient_once_per_line() {
+    let f = Fixture::new();
+    let dup = Address::generate(&f.env);
+    let recipients = vec![&f.env, dup.clone(), dup.clone()];
+
+    let receipt = f
+        .client
+        .execute_equal(&f.funder, &f.token.address, &recipients, &40);
+    assert_eq!(
+        receipt,
+        Receipt {
+            count: 2,
+            total: 80
+        }
+    );
+    assert_eq!(f.token.balance(&dup), 80);
+    assert_eq!(f.token.balance(&f.funder), MINT - 80);
 }
 
 #[test]

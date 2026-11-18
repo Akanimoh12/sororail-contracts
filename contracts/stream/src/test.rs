@@ -611,6 +611,9 @@ fn withdraw_event_amount_matches_the_token_transfer() {
     f.at(START + 300);
     let recipient_before = f.token.balance(&f.recipient);
     let withdrawn = f.client.withdraw(&Some(RATE * 100));
+    // Capture immediately: subsequent token balance invocations replace the
+    // events returned by `events().all()`.
+    let all = f.env.events().all();
     let transferred = f.token.balance(&f.recipient) - recipient_before;
 
     assert_eq!(transferred, RATE * 100);
@@ -618,7 +621,6 @@ fn withdraw_event_amount_matches_the_token_transfer() {
 
     // `withdraw` emits the token's own transfer event before its own
     // `Withdrawn`, so take the last event rather than assuming an index.
-    let all = f.env.events().all();
     let events = all.events();
     let last = events.last().expect("no events emitted");
     let expected = Withdrawn {
