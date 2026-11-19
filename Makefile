@@ -2,7 +2,7 @@ WASM_TARGET := wasm32v1-none
 WASM_DIR    := target/$(WASM_TARGET)/release
 CONTRACTS   := escrow stream vesting recurring batch_payout
 
-.PHONY: all build test test-all test-contracts fmt fmt-check lint audit optimize wasm-size specs clean ci coverage check-error-docs verify-deployments check-deployments check-wasm-sizes check-storage-footprint changelog check-changelog
+.PHONY: all build test test-all test-contracts fmt fmt-check lint audit optimize wasm-size specs clean ci coverage check-error-docs verify-deployments check-deployments check-wasm-sizes check-storage-footprint changelog check-changelog update-spec-snapshots check-spec-snapshots
 
 all: build test
 
@@ -120,6 +120,28 @@ check-changelog:
 	fi; \
 	rm -f "$$tmp"; \
 	echo "CHANGELOG.md is up to date."
+
+# Generate spec snapshot JSON files for every contract and commit the results.
+# Requires: stellar CLI  (cargo install --locked stellar-cli --features opt)
+# Run this whenever the ABI of any contract changes, then commit the updated
+# spec_snapshot.json files in contracts/<name>/.
+update-spec-snapshots: build
+	@command -v stellar >/dev/null || { \
+		echo "stellar CLI required: cargo install --locked stellar-cli --features opt" >&2; \
+		exit 1; \
+	}
+	@for c in $(CONTRACTS); do \
+		echo "updating spec snapshot for $$c"; \
+		stellar contract info interface --output json \
+			--wasm $(WASM_DIR)/sororail_$$c.wasm \
+			> contracts/$$c/spec_snapshot.json || exit 1; \
+	done
+	@echo "snapshots updated — commit the spec_snapshot.json files in contracts/"
+
+# Diff each contract's current spec against its committed snapshot and fail on
+# any drift. Silently skips if stellar CLI is not installed.
+check-spec-snapshots:
+	@bash scripts/check_spec_snapshots.sh
 
 clean:
 	cargo clean
