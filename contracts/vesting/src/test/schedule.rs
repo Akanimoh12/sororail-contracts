@@ -283,6 +283,109 @@ fn schedule_is_unchanged_by_revocation() {
 }
 
 #[test]
+fn schedule_has_a_maximum_of_three_checkpoints() {
+    // The vesting schedule is defined by start, cliff, and duration.
+    // This generates at most 3 corner points: start, cliff (if cliff > 0),
+    // and end. The checkpoint count never exceeds 3, so vested_amount
+    // computation is O(1) with no unbounded loops.
+    let env = Env::default();
+
+    // Case 1: cliff > 0 and cliff < duration → 3 checkpoints
+    let f1 = Fixture::with_schedule(true, CLIFF, DURATION);
+    assert_eq!(checkpoints(&f1).len(), 3);
+
+    // Case 2: cliff == 0 (no cliff) → 2 checkpoints (start and end)
+    let f2 = Fixture::with_schedule(true, 0, DURATION);
+    assert_eq!(checkpoints(&f2).len(), 2);
+
+    // Case 3: cliff == duration (all-or-nothing) → 2 checkpoints
+    let f3 = Fixture::with_schedule(true, DURATION, DURATION);
+    assert_eq!(checkpoints(&f3).len(), 2);
+
+    // Case 4: very short duration → still at most 3 checkpoints
+    let f4 = Fixture::with_schedule(true, 1, 2);
+    assert!(checkpoints(&f4).len() <= 3);
+}
+
+#[test]
+fn documented_cliff_and_rounding_semantics() {
+    // Verify the worked examples from docs/vesting-safe-range.md.
+    // 1,000-unit grant over 1,000 seconds with 100-second cliff.
+    let env = Env::default();
+    let grant_total = 1_000i128;
+    let cliff_seconds = 100u64;
+    let duration_seconds = 1_000u64;
+    let start = START;
+
+    let g = Grant {
+        grantor: Address::generate(&env),
+        beneficiary: Address::generate(&env),
+        token: Address::generate(&env),
+        total: grant_total,
+        start,
+        cliff: cliff_seconds,
+        duration: duration_seconds,
+        revocable: true,
+        claimed: 0,
+        returned: 0,
+        revoked_at: None,
+    };
+
+    // Timestamp (start + 0s) → 0 vested
+    assert_eq!(
+        g.vested_amount(start),
+        Ok(0),
+        "at start: nothing vests before cliff"
+    );
+
+    // Timestamp (start + 99s) → 0 vested (before cliff at 100s)
+    assert_eq!(
+        g.vested_amount(start + 99),
+        Ok(0),
+        "at start + 99s: still before cliff"
+    );
+
+    // Timestamp (start + 100s) → 100 vested (cliff: 1000 × 100 / 1000)
+    assert_eq!(
+        g.vested_amount(start + 100),
+        Ok(100),
+        "at cliff (start + 100s): cliff amount vests"
+    );
+
+    // Timestamp (start + 500s) → 500 vested (linear: 1000 × 500 / 1000)
+    assert_eq!(
+        g.vested_amount(start + 500),
+        Ok(500),
+        "at start + 500s: linear vesting midpoint"
+    );
+
+    // Timestamp (start + 999s) → 999 vested (before end)
+    assert_eq!(
+        g.vested_amount(start + 999),
+        Ok(999),
+        "at start + 999s: 1000 × 999 / 1000 = 999"
+    );
+
+    // Timestamp (start + 1000s) → 1000 vested (fully vested)
+    assert_eq!(
+        g.vested_amount(start + 1_000),
+        Ok(1_000),
+        "at end (start + 1000s): fully vested"
+    );
+
+    // Timestamp (start + 1001s) → 1000 vested (after end)
+    assert_eq!(
+        g.vested_amount(start + 1_001),
+        Ok(1_000),
+        "after end (start + 1001s): remains at total"
+    );
+
+    // Verify cliff is inclusive: at cliff - 1 is 0, at cliff is non-zero.
+    assert_eq!(g.vested_amount(start + cliff_seconds - 1), Ok(0));
+    assert!(g.vested_amount(start + cliff_seconds).unwrap() > 0);
+}
+
+#[test]
 fn create_funds_the_whole_grant_up_front() {
     let f = Fixture::new(true);
     assert_eq!(f.held(), TOTAL);
