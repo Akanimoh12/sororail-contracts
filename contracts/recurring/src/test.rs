@@ -639,6 +639,15 @@ fn charge_requires_the_payees_authorization() {
     f.client.charge();
 }
 
+#[test]
+#[should_panic]
+fn charge_up_to_requires_the_payees_authorization() {
+    let f = Fixture::new(None);
+    f.at(START + PERIOD);
+    f.env.set_auths(&[]);
+    f.client.charge_up_to(&1);
+}
+
 /// When the payer's token allowance to this contract is insufficient,
 /// `charge` must fail cleanly — reverting the `periods_charged` /
 /// `next_chargeable_at` state that was persisted just before the
