@@ -129,5 +129,10 @@ go through normal review.
 Adding CoinFabrik's Scout, an open-source static analyzer built for Soroban,
 is tracked as follow-up work.
 
+Verifiable builds are documented in
+[docs/reproducible-builds.md](docs/reproducible-builds.md). CI builds the WASM
+twice in clean containers and compares SHA-256 hashes before a release is
+trusted.
+
 The Stellar bug bounty covers Soroban platform exploits; contract-level
 findings in this repository are ours, not theirs.

@@ -77,6 +77,10 @@ make ci         # everything CI runs
 `cargo-nextest` is the test runner in CI. Install it locally with
 `cargo install cargo-nextest`.
 
+For token movement diagrams, see [docs/fund-flows.md](docs/fund-flows.md). For
+the pinned verifiable build and the CI hash comparison, see
+[docs/reproducible-builds.md](docs/reproducible-builds.md).
+
 ### Local quickstart smoke test
 
 The optional **Quickstart smoke** workflow is manually triggered from the
