@@ -25,13 +25,11 @@ fn resolve_requires_a_dispute() {
 }
 
 #[test]
-#[should_panic(expected = "dispute requires an arbiter")]
 fn resolve_guards_against_a_missing_arbiter_even_if_disputed_is_reached() {
-    // `dispute` already refuses to run without an arbiter
-    // (`dispute_requires_an_arbiter`), so this state is unreachable through
-    // the public API. `resolve`'s `.expect(...)` re-checks anyway as
-    // defense-in-depth (#105) -- this proves that check actually fires,
-    // rather than trusting it's dead code that happens to compile.
+    // `dispute` already refuses to run without an arbiter, so reaching
+    // `State::Disputed` without one is impossible through the public API.
+    // `resolve` re-checks with `ok_or(Error::EscrowNoArbiter)` as
+    // defense-in-depth (#464): returns a typed error rather than a panic.
     let f = Fixture::funded(false);
     f.env.as_contract(&f.client.address, || {
         let mut escrow = crate::storage::load(&f.env).unwrap();
@@ -39,7 +37,7 @@ fn resolve_guards_against_a_missing_arbiter_even_if_disputed_is_reached() {
         crate::storage::save(&f.env, &escrow);
     });
 
-    f.client.resolve(&5_000);
+    assert_eq!(f.client.try_resolve(&5_000), Err(Ok(Error::EscrowNoArbiter)));
 }
 
 #[test]
@@ -476,4 +474,107 @@ fn resolve_requires_the_arbiters_authorization() {
     // Clear auths so require_auth bites.
     f.env.set_auths(&[]);
     f.client.resolve(&5_000);
+}
+
+// ================================================================
+// Issue #467: golden-file tests for the full escrow dispute token flow.
+//
+// These tests pin exact token balances after `resolve` at the five canonical
+// bps checkpoints. Together they document the dispute resolution token flow
+// and catch regressions in the split math.
+//
+// AMOUNT = 1_000_000 (defined in mod.rs)
+// beneficiary = floor(AMOUNT * bps / 10_000)
+// depositor   = AMOUNT - beneficiary  (no rounding leakage)
+// ================================================================
+
+mod golden_file {
+    use super::*;
+
+    fn resolve_at(bps: u32) -> (i128, i128, i128) {
+        let f = Fixture::funded(true);
+        let depositor_before = f.token.balance(&f.depositor);
+        f.client.dispute(&f.depositor);
+        f.client.resolve(&bps);
+        let beneficiary = f.token.balance(&f.beneficiary);
+        let depositor_gain = f.token.balance(&f.depositor) - depositor_before;
+        (beneficiary, depositor_gain, f.escrow_balance())
+    }
+
+    #[test]
+    fn golden_bps_0_depositor_receives_all() {
+        let (beneficiary, depositor_gain, escrow) = resolve_at(0);
+        assert_eq!(beneficiary, 0,         "bps=0: beneficiary gets nothing");
+        assert_eq!(depositor_gain, AMOUNT,  "bps=0: depositor gets full amount");
+        assert_eq!(escrow, 0,              "escrow drained");
+    }
+
+    #[test]
+    fn golden_bps_1_minimum_split() {
+        // floor(1_000_000 * 1 / 10_000) = 100
+        let (beneficiary, depositor_gain, escrow) = resolve_at(1);
+        assert_eq!(beneficiary, 100);
+        assert_eq!(depositor_gain, AMOUNT - 100);
+        assert_eq!(beneficiary + depositor_gain, AMOUNT);
+        assert_eq!(escrow, 0);
+    }
+
+    #[test]
+    fn golden_bps_5000_even_split() {
+        // floor(1_000_000 * 5_000 / 10_000) = 500_000
+        let (beneficiary, depositor_gain, escrow) = resolve_at(5_000);
+        assert_eq!(beneficiary, 500_000);
+        assert_eq!(depositor_gain, 500_000);
+        assert_eq!(beneficiary + depositor_gain, AMOUNT);
+        assert_eq!(escrow, 0);
+    }
+
+    #[test]
+    fn golden_bps_9999_maximum_before_full() {
+        // floor(1_000_000 * 9_999 / 10_000) = 999_900
+        let (beneficiary, depositor_gain, escrow) = resolve_at(9_999);
+        assert_eq!(beneficiary, 999_900);
+        assert_eq!(depositor_gain, AMOUNT - 999_900);
+        assert_eq!(beneficiary + depositor_gain, AMOUNT);
+        assert_eq!(escrow, 0);
+    }
+
+    #[test]
+    fn golden_bps_10000_beneficiary_receives_all() {
+        let (beneficiary, depositor_gain, escrow) = resolve_at(10_000);
+        assert_eq!(beneficiary, AMOUNT,  "bps=10000: beneficiary gets full amount");
+        assert_eq!(depositor_gain, 0,    "bps=10000: depositor gets nothing");
+        assert_eq!(escrow, 0);
+    }
+
+    #[test]
+    fn golden_no_dust_remains_in_escrow() {
+        for bps in [0u32, 1, 100, 500, 1_000, 5_000, 9_000, 9_999, 10_000] {
+            let (beneficiary, depositor_gain, escrow) = resolve_at(bps);
+            assert_eq!(beneficiary + depositor_gain, AMOUNT, "bps={bps}: split != AMOUNT");
+            assert_eq!(escrow, 0, "bps={bps}: escrow not drained");
+        }
+    }
+}
+
+mod proptest_resolve {
+    use super::*;
+    use proptest::prelude::*;
+    use sororail_common::strategies;
+
+    proptest! {
+        #[test]
+        fn resolve_split_sums_to_amount_for_any_bps(bps in strategies::arb_bps()) {
+            let f = Fixture::funded(true);
+            let depositor_before = f.token.balance(&f.depositor);
+            f.client.dispute(&f.depositor);
+            if f.client.try_resolve(&bps).is_ok() {
+                let beneficiary = f.token.balance(&f.beneficiary);
+                let depositor_gain = f.token.balance(&f.depositor) - depositor_before;
+                prop_assert_eq!(beneficiary + depositor_gain, AMOUNT,
+                    "split did not sum to AMOUNT at bps={}", bps);
+                prop_assert_eq!(f.escrow_balance(), 0, "escrow not drained at bps={}", bps);
+            }
+        }
+    }
 }
