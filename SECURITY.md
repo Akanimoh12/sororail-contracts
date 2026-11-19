@@ -59,6 +59,29 @@ and anything that depends on deploying to mainnet, which we ask you not to do.
 
 ## Known limitations and design decisions
 
+### Supported token assumptions
+
+All five contracts interact with Stellar tokens through the [SEP-41 token interface](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md). They assume **well-behaved, standard tokens** and are **not** designed to handle the following token types:
+
+| Token type | Description | Why it is out of scope |
+| --- | --- | --- |
+| Fee-on-transfer | A portion of each `transfer` is deducted as a fee, so the recipient receives less than the amount specified. | `escrow`, `stream`, `vesting`, and `recurring` compute exact amounts to transfer. If a fee is silently deducted, the contract holds less than it believes, breaking the conservation invariant (`withdrawn + refunded + remaining == deposited`). |
+| Rebasing | The token's balance of a held address changes over time without any transfer. | A rebasing token that increases balances after a stream is funded gives the contract a surplus it has no mechanism to distribute. A rebasing token that decreases balances causes the contract to hold less than it owes, which can break payouts. |
+| Callback / re-entrant | The token calls back into the contract during a `transfer`. | Entry points persist state _before_ calling the token (see e.g. `escrow::fund`, `stream::cancel`) to defend against re-entry. A callback token that re-enters via a different entry point still observes a valid, persisted state, but multi-entry-point re-entry has not been exhaustively tested. Such tokens should be treated as untrusted. |
+
+**How these assumptions are defended in practice:**
+
+- `stream::create` and `vesting::create` pull the full deposit up front. If the amount that arrives in the contract differs from what was requested (fee-on-transfer), the stream or grant is misconfigured from the start, but the contracts have no mechanism to detect this at creation time.
+- `recurring` holds no funds and uses `transfer_from`; a fee-on-transfer token would cause the payee to receive less than `amount_per_period`, which is a semantic error but does not violate the pull invariant (`periods_charged * amount_per_period`), because that invariant tracks what was _requested_, not what was _received_.
+- State is always persisted before the token call (`storage::save` before `transfer`), so a re-entrant token observes the post-transition state rather than the pre-transition one. This is intentional and documented inline in `contract.rs` for each contract.
+
+**Relevant tests:**
+
+- Conservation invariants: `contracts/stream/src/test.rs` (`assert_conserved`), `contracts/vesting/src/test/conservation.rs`
+- Re-entry defense: `escrow` saves state before `transfer` in `fund`, `release`, `refund`, and `resolve`; `stream` saves before `pay`/`pull` in all mutating entry points.
+
+Integrators who need to support fee-on-transfer or rebasing tokens must wrap these contracts or handle the discrepancy off-chain.
+
 ### Escrow dispute timeout
 
 The `escrow` contract requires an arbiter to resolve disputed escrows by calling

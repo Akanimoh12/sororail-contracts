@@ -676,6 +676,9 @@ fn entry_points_error_before_create() {
     assert_eq!(c.try_claimable(), Err(Ok(Error::NotInitialized)));
     assert_eq!(c.try_remaining(), Err(Ok(Error::NotInitialized)));
     assert_eq!(c.try_vested_amount(&START), Err(Ok(Error::NotInitialized)));
+    assert_eq!(c.try_schedule(), Err(Ok(Error::NotInitialized)));
+    assert_eq!(c.try_bump(), Err(Ok(Error::NotInitialized)));
+    assert_eq!(c.try_get(), Err(Ok(Error::NotInitialized)));
 }
 
 /// Issue #227: `get` on a contract that has not run `create` yet must return
