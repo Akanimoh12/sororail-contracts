@@ -2,7 +2,7 @@ WASM_TARGET := wasm32v1-none
 WASM_DIR    := target/$(WASM_TARGET)/release
 CONTRACTS   := escrow stream vesting recurring batch_payout
 
-.PHONY: all build test test-all test-contracts fmt fmt-check lint audit optimize wasm-size specs clean ci coverage check-error-docs verify-deployments check-deployments check-wasm-sizes check-storage-footprint
+.PHONY: all build test test-all test-contracts fmt fmt-check lint audit optimize wasm-size specs clean ci coverage check-error-docs verify-deployments check-deployments check-wasm-sizes check-storage-footprint changelog check-changelog
 
 all: build test
 
@@ -92,6 +92,34 @@ coverage:
 		--fail-under-regions 75 \
 		--fail-under-functions 80
 	bash scripts/audit-error-variant-coverage.sh
+
+# Regenerate CHANGELOG.md from the git log via git-cliff (#444). Commits
+# already follow Conventional Commits; the mapping to Keep-a-Changelog
+# sections lives in cliff.toml. `check-changelog` is the read-only form
+# used in CI: it prints the generated file to stdout and fails if the
+# committed file is stale.
+changelog:
+	@command -v git-cliff >/dev/null || { \
+		echo "git-cliff is required. Install with 'cargo install git-cliff --locked' or 'brew install git-cliff'." >&2; \
+		exit 1; \
+	}
+	git-cliff --config cliff.toml --output CHANGELOG.md
+	@echo "CHANGELOG.md regenerated."
+
+check-changelog:
+	@command -v git-cliff >/dev/null || { \
+		echo "git-cliff is required. Install with 'cargo install git-cliff --locked' or 'brew install git-cliff'." >&2; \
+		exit 1; \
+	}
+	@tmp="$$(mktemp)"; \
+	git-cliff --config cliff.toml --output "$$tmp" >/dev/null; \
+	if ! diff -u CHANGELOG.md "$$tmp"; then \
+		echo "CHANGELOG.md is out of date — run 'make changelog' and commit the result." >&2; \
+		rm -f "$$tmp"; \
+		exit 1; \
+	fi; \
+	rm -f "$$tmp"; \
+	echo "CHANGELOG.md is up to date."
 
 clean:
 	cargo clean
