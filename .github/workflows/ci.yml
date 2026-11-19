@@ -128,6 +128,16 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+  link-check:
+    name: markdown link check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: install lychee
+        run: cargo install lychee
+      - name: check markdown links
+        run: lychee --offline --no-progress '**/*.md'
+
   build:
     name: wasm build
     runs-on: ubuntu-latest
@@ -337,6 +347,7 @@ jobs:
       - check
       - test-contracts
       - doc
+      - link-check
       - build
       - reproducible
       - msrv
@@ -352,6 +363,7 @@ jobs:
           echo "check: ${{ needs.check.result }}"
           echo "test-contracts: ${{ needs.test-contracts.result }}"
           echo "doc: ${{ needs.doc.result }}"
+          echo "link-check: ${{ needs.link-check.result }}"
           echo "build: ${{ needs.build.result }}"
           echo "reproducible: ${{ needs.reproducible.result }}"
           echo "msrv: ${{ needs.msrv.result }}"
@@ -362,6 +374,7 @@ jobs:
              [[ "${{ needs.check.result }}" == "failure" ]] || \
              [[ "${{ needs.test-contracts.result }}" == "failure" ]] || \
              [[ "${{ needs.doc.result }}" == "failure" ]] || \
+             [[ "${{ needs.link-check.result }}" == "failure" ]] || \
              [[ "${{ needs.build.result }}" == "failure" ]] || \
              [[ "${{ needs.reproducible.result }}" == "failure" ]] || \
              [[ "${{ needs.msrv.result }}" == "failure" ]] || \
@@ -371,6 +384,7 @@ jobs:
              [[ "${{ needs.check.result }}" == "cancelled" ]] || \
              [[ "${{ needs.test-contracts.result }}" == "cancelled" ]] || \
              [[ "${{ needs.doc.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.link-check.result }}" == "cancelled" ]] || \
              [[ "${{ needs.build.result }}" == "cancelled" ]] || \
              [[ "${{ needs.reproducible.result }}" == "cancelled" ]] || \
              [[ "${{ needs.msrv.result }}" == "cancelled" ]] || \

@@ -21,8 +21,11 @@ code. Scope discipline is the point of this project — see the non-goals in
 ```bash
 rustup target add wasm32v1-none
 cargo install cargo-nextest
-make ci          # fmt-check, lint, test, build
+make check       # fmt-check, lint, test, build, docs and deployment checks
 ```
+
+`make check` mirrors the required CI jobs. Run it before opening a PR.
+`make ci` is an alias for `make check` and is what CI itself executes.
 
 The toolchain is pinned in `rust-toolchain.toml`; rustup will honour it
 automatically.
@@ -31,7 +34,7 @@ automatically.
 
 - [ ] Tests added, including an authorization test for any new privileged entry
       point and edge cases for any new arithmetic
-- [ ] `make ci` green locally
+- [ ] `make check` green locally
 - [ ] Docs updated — a PR that changes public behavior without touching docs is
       incomplete
 - [ ] No unrelated changes

@@ -194,6 +194,8 @@ fn entry_points_error_before_init() {
     assert_eq!(client.try_dispute(&who), Err(Ok(Error::NotInitialized)));
     assert_eq!(client.try_resolve(&5_000), Err(Ok(Error::NotInitialized)));
     assert_eq!(client.try_state(), Err(Ok(Error::NotInitialized)));
+    assert_eq!(client.try_bump(), Err(Ok(Error::NotInitialized)));
+    assert_eq!(client.try_get(), Err(Ok(Error::NotInitialized)));
 }
 
 #[test]

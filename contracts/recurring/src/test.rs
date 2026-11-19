@@ -187,6 +187,9 @@ fn entry_points_error_before_authorize() {
     assert_eq!(c.try_cancel(&who), Err(Ok(Error::NotInitialized)));
     assert_eq!(c.try_next_chargeable_at(), Err(Ok(Error::NotInitialized)));
     assert_eq!(c.try_is_chargeable(), Err(Ok(Error::NotInitialized)));
+    assert_eq!(c.try_remaining_periods(), Err(Ok(Error::NotInitialized)));
+    assert_eq!(c.try_bump(), Err(Ok(Error::NotInitialized)));
+    assert_eq!(c.try_get(), Err(Ok(Error::NotInitialized)));
 }
 
 #[test]

@@ -183,16 +183,20 @@ revisiting: an id-keyed design would let a single deployment hold many
 positions, which matters for the payroll and dashboard screens the app is
 meant to have.
 
+## Security
+
+See [SECURITY.md](SECURITY.md) for the vulnerability reporting policy, the
+supported token assumptions (SEP-41 compliant, standard tokens only — fee-on-transfer,
+rebasing and callback tokens are out of scope), and the automated audit setup.
+
+Do not report vulnerabilities through public issues.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Issues labelled `good-first-issue` are
 scoped so that someone new to Soroban can complete them.
 
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
-
-
-## Updates
-
-Updated documentation for recent changes.
