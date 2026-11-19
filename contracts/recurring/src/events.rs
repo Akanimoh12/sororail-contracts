@@ -26,10 +26,14 @@ pub struct Charged {
     pub payee: Address,
     pub payer: Address,
     pub amount: i128,
+    /// One-based ordinal of this successful charge within the authorization.
+    pub period_index: u32,
     /// How many charges have now been taken.
     pub periods_charged: u32,
     /// When the next charge becomes available.
     pub next_chargeable_at: u64,
+    /// Charges still permitted under the authorization cap, if capped.
+    pub remaining: Option<u32>,
 }
 
 /// Either party cancelled the authorization.

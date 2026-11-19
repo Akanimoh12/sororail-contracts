@@ -48,11 +48,15 @@ after `dispute` and is signed by the stored arbiter.
 ```bash
 stellar contract invoke --network "$NETWORK" --source-account sender --id "$RECURRING_ID" -- authorize --payer "$SENDER" --payee "$PAYEE" --token "$TOKEN_ID" --amount_per_period 1000 --period_seconds 2592000 --max_periods 12
 stellar contract invoke --network "$NETWORK" --source-account payee --id "$RECURRING_ID" -- charge
+stellar contract invoke --network "$NETWORK" --source-account payee --id "$RECURRING_ID" -- charge_up_to --max_periods 3
 stellar contract invoke --network "$NETWORK" --id "$RECURRING_ID" -- bump
 ```
 
-Before `charge`, the payer must approve the recurring contract as a token
+Before charging, the payer must approve the recurring contract as a token
 spender. Removing that allowance or calling `cancel` stops future charges.
+`charge_up_to` is an explicit catch-up option limited by its `max_periods`
+argument and the authorization's remaining cap; see
+[`recurring-keepers.md`](recurring-keepers.md) for keeper guidance.
 
 ## Batch payout
 

@@ -48,7 +48,7 @@ or renumbers a variant in `errors.rs`.
 | 66 | `VestingScheduleOverflow` | vesting | `start + duration` would overflow `u64`. |
 | 80 | `RecurringNotFound` | recurring | No authorization exists for the given id. |
 | 81 | `RecurringCancelled` | recurring | The authorization has been cancelled. |
-| 82 | `RecurringPeriodNotElapsed` | recurring | `charge` called before `next_chargeable_at` (including the first charge). |
+| 82 | `RecurringPeriodNotElapsed` | recurring | `charge` or `charge_up_to` called before `next_chargeable_at` (including the first charge). |
 | 83 | `RecurringExhausted` | recurring | `max_periods` has been exhausted. |
 | 100 | `BatchEmpty` | batch_payout | The recipient list was empty. |
 | 101 | `BatchTooLarge` | batch_payout | The recipient list exceeds the documented maximum. |
