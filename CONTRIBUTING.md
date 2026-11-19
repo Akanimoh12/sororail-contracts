@@ -164,6 +164,13 @@ cargo +nightly fuzz run fuzz_mul_div
 Not run in CI (fuzzing is open-ended, not pass/fail); run it locally after
 touching `math.rs`.
 
+## Code of Conduct
+
+All participation in this project is governed by our
+[Code of Conduct](CODE_OF_CONDUCT.md). By contributing, you agree to abide by
+its terms. Reports of violations go to rubelu2017@gmail.com (see
+[SECURITY.md](SECURITY.md) for the same contact and reporting context).
+
 ## Security
 
 Do not report vulnerabilities through public issues. See [SECURITY.md](SECURITY.md).
