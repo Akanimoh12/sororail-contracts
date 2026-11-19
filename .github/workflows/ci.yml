@@ -338,6 +338,40 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Issue #455: verify that every workflow step that installs Rust uses the
+  # channel declared in rust-toolchain.toml. This job reads the file and
+  # compares it against the installed rustc, so bumping only rust-toolchain.toml
+  # is enough to move CI — no workflow edits required. Any drift between the
+  # file and the installed toolchain fails this job before tests run.
+  toolchain-check:
+    name: toolchain file matches CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Read the channel from rust-toolchain.toml and pass it to the installer.
+      # This is the single source of truth; the hard-coded version string in
+      # other jobs must equal what this file declares.
+      - name: read toolchain channel
+        id: toolchain
+        run: |
+          channel="$(sed -n 's/^channel *= *"\(.*\)".*/\1/p' rust-toolchain.toml)"
+          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
+          echo "Toolchain channel from rust-toolchain.toml: ${channel}"
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+      - name: verify installed rustc matches rust-toolchain.toml
+        run: |
+          expected="${{ steps.toolchain.outputs.channel }}"
+          actual="$(rustc -V | awk '{print $2}')"
+          echo "rust-toolchain.toml channel : ${expected}"
+          echo "rustc --version patch       : ${actual}"
+          if [ "${actual}" != "${expected}" ]; then
+            echo "::error::Toolchain mismatch: rust-toolchain.toml declares '${expected}' but rustc reports '${actual}'. Update rust-toolchain.toml to bump the toolchain — do not edit workflow files directly."
+            exit 1
+          fi
+          echo "✅ Toolchain matches: ${actual}"
+
   all-checks:
     name: all checks
     runs-on: ubuntu-latest
@@ -353,6 +387,7 @@ jobs:
       - msrv
       - coverage
       - audit
+      - toolchain-check
     steps:
       - name: decide whether all required jobs succeeded
         run: |
@@ -369,6 +404,7 @@ jobs:
           echo "msrv: ${{ needs.msrv.result }}"
           echo "coverage: ${{ needs.coverage.result }}"
           echo "audit: ${{ needs.audit.result }}"
+          echo "toolchain-check: ${{ needs.toolchain-check.result }}"
 
           if [[ "${{ needs.conventional-commits.result }}" == "failure" ]] || \
              [[ "${{ needs.check.result }}" == "failure" ]] || \
@@ -380,6 +416,7 @@ jobs:
              [[ "${{ needs.msrv.result }}" == "failure" ]] || \
              [[ "${{ needs.coverage.result }}" == "failure" ]] || \
              [[ "${{ needs.audit.result }}" == "failure" ]] || \
+             [[ "${{ needs.toolchain-check.result }}" == "failure" ]] || \
              [[ "${{ needs.conventional-commits.result }}" == "cancelled" ]] || \
              [[ "${{ needs.check.result }}" == "cancelled" ]] || \
              [[ "${{ needs.test-contracts.result }}" == "cancelled" ]] || \
@@ -389,7 +426,8 @@ jobs:
              [[ "${{ needs.reproducible.result }}" == "cancelled" ]] || \
              [[ "${{ needs.msrv.result }}" == "cancelled" ]] || \
              [[ "${{ needs.coverage.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.audit.result }}" == "cancelled" ]]; then
+             [[ "${{ needs.audit.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.toolchain-check.result }}" == "cancelled" ]]; then
             echo "❌ One or more required jobs failed or were cancelled"
             exit 1
           fi

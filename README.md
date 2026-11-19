@@ -16,7 +16,9 @@ this one. Nothing downstream can be correct until these are.
 > complete.** No mainnet addresses will be published before then. See
 > [SECURITY.md](SECURITY.md).
 
-The full org build specification lives in [SPEC.md](SPEC.md).
+The full org build specification lives in [SPEC.md](SPEC.md). Common questions
+about token decimals, TTL, and contract immutability are answered in
+[docs/faq.md](docs/faq.md).
 
 ## The contracts
 
