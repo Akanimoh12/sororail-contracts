@@ -110,7 +110,7 @@ pub fn release(env: Env, caller: Address) -> Result<(), Error> {
 With several eligible signers the contract cannot know which one is acting, so
 the caller has to say, and it needs to be recorded for the event
 (`released_by`, `cancelled_by`, `raised_by`). The guard rejects an outsider
-with `Unauthorized` *before* any signature is requested, which is the
+with `Unauthorized` _before_ any signature is requested, which is the
 membership-before-auth rule above.
 
 Used by `escrow` (`release`, `refund`, `dispute`) and `recurring::cancel`.
@@ -132,13 +132,17 @@ Rules of thumb:
 - Never call `caller.require_auth()` on an unchecked `caller`. That proves the
   caller signed, not that it is allowed to act.
 - Either way, add an authorization test proving a wrong party is rejected.
+
 ## Conventions
 
 - **Commits:** [Conventional Commits](https://www.conventionalcommits.org),
   enforced in CI.
 - **Branching:** trunk-based. Short-lived branches, PRs into `main`, squash
   merge, linear history.
-- **CI must be green to merge.** No exceptions for maintainers.
+- **CI must be green to merge.** No exceptions for maintainers. Branch protection
+  requires the `all-checks` summary job to pass rather than listing every
+  individual job. This summary job depends on all other CI jobs and fails if any
+  dependency fails or is cancelled.
 - **Formatting:** `cargo fmt`. Lints: `cargo clippy`, warnings denied.
 
 ## Fuzzing

@@ -54,8 +54,14 @@ jobs:
           echo "rustc --version patch=${actual}"
           test "${actual}" = "${expected}"
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - name: cache cargo bin tools
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bin-
       - uses: taiki-e/install-action@4765db214858792ed289a2b5e543daf93d682a48 # nextest
-
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo nextest run --workspace
@@ -88,6 +94,13 @@ jobs:
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           key: ${{ matrix.package }}
+      - name: cache cargo bin tools
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bin-
       - uses: taiki-e/install-action@4765db214858792ed289a2b5e543daf93d682a48 # nextest
       - run: cargo nextest run -p ${{ matrix.package }}
 
@@ -239,6 +252,13 @@ jobs:
           actual="$(rustc -V | awk '{print $2}')"
           test "${actual}" = "${expected}"
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - name: cache cargo bin tools
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cargo-bin-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bin-
       - uses: taiki-e/install-action@ab4220e067fa624f7930084426dbfb7440a52829 # cargo-llvm-cov
       - uses: taiki-e/install-action@4765db214858792ed289a2b5e543daf93d682a48 # nextest
       # Line coverage alone can miss error-path branches (issue #52). Gate
@@ -248,6 +268,34 @@ jobs:
           --fail-under-lines 90
           --fail-under-regions 75
           --fail-under-functions 80
+          --lcov --output-path lcov.info
+      - name: upload coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage-report
+          path: lcov.info
+      - name: generate coverage summary
+        id: coverage
+        run: |
+          # Parse coverage percentages from lcov.info
+          lines_found=$(grep -o "LF:[0-9]*" lcov.info | awk -F: '{sum+=$2} END {print sum}')
+          lines_hit=$(grep -o "LH:[0-9]*" lcov.info | awk -F: '{sum+=$2} END {print sum}')
+          funcs_found=$(grep -o "FNF:[0-9]*" lcov.info | awk -F: '{sum+=$2} END {print sum}')
+          funcs_hit=$(grep -o "FNH:[0-9]*" lcov.info | awk -F: '{sum+=$2} END {print sum}')
+
+          lines_pct=$(awk "BEGIN {printf \"%.2f\", ($lines_hit / $lines_found) * 100}")
+          funcs_pct=$(awk "BEGIN {printf \"%.2f\", ($funcs_hit / $funcs_found) * 100}")
+
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## Coverage Report
+
+          | Metric | Coverage |
+          |--------|----------|
+          | Lines | ${lines_pct}% (${lines_hit}/${lines_found}) |
+          | Functions | ${funcs_pct}% (${funcs_hit}/${funcs_found}) |
+
+          Thresholds: Lines ≥90%, Regions ≥75%, Functions ≥80%
+          EOF
       - name: audit Error::* variants are referenced in tests
         run: bash scripts/audit-error-variant-coverage.sh
 
@@ -268,3 +316,56 @@ jobs:
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  all-checks:
+    name: all checks
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - conventional-commits
+      - check
+      - test-contracts
+      - doc
+      - build
+      - reproducible
+      - msrv
+      - coverage
+      - audit
+    steps:
+      - name: decide whether all required jobs succeeded
+        run: |
+          # Fail if any dependency job failed or was cancelled.
+          # Skipped jobs (e.g., conventional-commits on push) are ignored.
+          echo "Job results:"
+          echo "conventional-commits: ${{ needs.conventional-commits.result }}"
+          echo "check: ${{ needs.check.result }}"
+          echo "test-contracts: ${{ needs.test-contracts.result }}"
+          echo "doc: ${{ needs.doc.result }}"
+          echo "build: ${{ needs.build.result }}"
+          echo "reproducible: ${{ needs.reproducible.result }}"
+          echo "msrv: ${{ needs.msrv.result }}"
+          echo "coverage: ${{ needs.coverage.result }}"
+          echo "audit: ${{ needs.audit.result }}"
+
+          if [[ "${{ needs.conventional-commits.result }}" == "failure" ]] || \
+             [[ "${{ needs.check.result }}" == "failure" ]] || \
+             [[ "${{ needs.test-contracts.result }}" == "failure" ]] || \
+             [[ "${{ needs.doc.result }}" == "failure" ]] || \
+             [[ "${{ needs.build.result }}" == "failure" ]] || \
+             [[ "${{ needs.reproducible.result }}" == "failure" ]] || \
+             [[ "${{ needs.msrv.result }}" == "failure" ]] || \
+             [[ "${{ needs.coverage.result }}" == "failure" ]] || \
+             [[ "${{ needs.audit.result }}" == "failure" ]] || \
+             [[ "${{ needs.conventional-commits.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.check.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.test-contracts.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.doc.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.build.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.reproducible.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.msrv.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.coverage.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.audit.result }}" == "cancelled" ]]; then
+            echo "❌ One or more required jobs failed or were cancelled"
+            exit 1
+          fi
+          echo "✅ All required jobs passed"
