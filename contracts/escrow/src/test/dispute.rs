@@ -1,7 +1,8 @@
-// --------------------------------------------------------------- dispute
+// dispute
 
 use super::*;
-use soroban_sdk::{testutils::Events as _, Event as _};
+
+// --------------------------------------------------------------- dispute
 
 #[test]
 fn dispute_requires_an_arbiter() {
@@ -59,19 +60,33 @@ fn dispute_requires_funding_first() {
 }
 
 #[test]
+fn dispute_rejects_an_already_released_escrow() {
+    // `release` is terminal, so `require_funded` must reject it with
+    // `EscrowClosed` rather than `EscrowNotFunded` -- a released escrow is
+    // closed, not simply never-funded (#257).
+    let f = Fixture::funded(true);
+    f.client.release(&f.depositor);
+    assert_eq!(
+        f.client.try_dispute(&f.depositor),
+        Err(Ok(Error::EscrowClosed))
+    );
+}
+
+#[test]
 fn dispute_emits_disputed_event_with_correct_topics_and_data() {
     let f = Fixture::funded(true);
     f.client.dispute(&f.depositor);
 
-    let all = f.env.events().all().filter_by_contract(&f.client.address);
+    // `events().all()` only returns events from the *last* invocation.
+    let all = f.env.events().all();
     let events = all.events();
-    // Disputed only (from the last invocation)
     assert_eq!(events.len(), 1);
 
+    let disputed_event = &events[0];
     let expected = Disputed {
         raised_by: f.depositor.clone(),
     };
-    assert_eq!(&events[0], &expected.to_xdr(&f.env, &f.client.address));
+    assert_eq!(disputed_event, &expected.to_xdr(&f.env, &f.client.address));
 }
 
 #[test]
@@ -83,9 +98,12 @@ fn release_and_refund_are_blocked_while_disputed() {
         Err(Ok(Error::EscrowNotFunded))
     );
     f.advance_past_deadline();
+    // Disputed-but-within-the-grace-period is special-cased ahead of the
+    // ordinary state check, so this is `DeadlineNotReached` (the dispute
+    // grace period, not the original deadline), not `EscrowNotFunded`.
     assert_eq!(
         f.client.try_refund(&f.depositor),
-        Err(Ok(Error::EscrowNotFunded))
+        Err(Ok(Error::DeadlineNotReached))
     );
     assert_eq!(f.escrow_balance(), AMOUNT);
 }

@@ -1,7 +1,8 @@
-// ---------------------------------------------------------------- refund
+// refund
 
 use super::*;
-use soroban_sdk::{testutils::Events as _, Event as _};
+
+// ---------------------------------------------------------------- refund
 
 #[test]
 fn refund_by_depositor_is_blocked_before_the_deadline() {
@@ -32,16 +33,17 @@ fn refund_emits_refunded_event_with_correct_topics_and_data() {
     f.advance_past_deadline();
     f.client.refund(&f.depositor);
 
-    let all = f.env.events().all().filter_by_contract(&f.client.address);
+    // `refund` emits the token's own transfer event before its own
+    // `Refunded`, so take the last event rather than assuming an index.
+    let all = f.env.events().all();
     let events = all.events();
-    // Refunded only (from the last invocation)
-    assert_eq!(events.len(), 1);
+    let last = events.last().expect("no events emitted");
     let expected = Refunded {
         depositor: f.depositor.clone(),
         amount: AMOUNT,
         refunded_by: f.depositor.clone(),
     };
-    assert_eq!(&events[0], &expected.to_xdr(&f.env, &f.client.address));
+    assert_eq!(last, &expected.to_xdr(&f.env, &f.client.address));
 }
 
 #[test]
@@ -50,6 +52,28 @@ fn refund_by_arbiter_is_allowed_before_the_deadline() {
     f.client.refund(&f.arbiter);
     assert_eq!(f.escrow_balance(), 0);
     assert_eq!(f.client.state(), State::Refunded);
+}
+
+#[test]
+fn refund_moves_the_funded_tokens_back_to_the_depositor() {
+    // The other refund tests check `escrow_balance()` and `state()` but
+    // never that the depositor's own balance actually went back up -- a
+    // regression that zeroed the escrow without paying anyone would still
+    // pass those (#256). Covers both callers the funds can move under:
+    // the depositor themselves (after the deadline) and the arbiter (at
+    // any time).
+    let f = Fixture::funded(true);
+    let depositor_before = f.token.balance(&f.depositor);
+    f.advance_past_deadline();
+    f.client.refund(&f.depositor);
+    assert_eq!(f.token.balance(&f.depositor), depositor_before + AMOUNT);
+    assert_eq!(f.escrow_balance(), 0);
+
+    let g = Fixture::funded(true);
+    let depositor_before = g.token.balance(&g.depositor);
+    g.client.refund(&g.arbiter);
+    assert_eq!(g.token.balance(&g.depositor), depositor_before + AMOUNT);
+    assert_eq!(g.escrow_balance(), 0);
 }
 
 #[test]

@@ -1,16 +1,17 @@
 use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
+    testutils::{storage::Instance as _, Address as _, Events as _, Ledger as _},
     token::{StellarAssetClient, TokenClient},
-    Address, Env,
+    Address, Env, Event,
 };
-use sororail_common::Error;
+use sororail_common::{storage::INSTANCE_BUMP, testutils::TestEnv, Error};
 
 use crate::{
     contract::{EscrowContract, EscrowContractClient},
-    events::{Created, Disputed, Funded, Refunded, Released, Resolved},
+    events::{Cancelled, Created, Disputed, Funded, Refunded, Released, Resolved},
     types::State,
 };
 
+mod cancel;
 mod dispute;
 mod fund;
 mod init;
@@ -36,19 +37,21 @@ impl Fixture<'_> {
     /// Builds an initialized escrow. `with_arbiter` controls whether the
     /// dispute path is available.
     fn new(with_arbiter: bool) -> Self {
-        let env = Env::default();
-        env.mock_all_auths();
-        env.ledger().with_mut(|l| l.timestamp = START_TS);
+        Self::with_amount(with_arbiter, AMOUNT)
+    }
 
-        let depositor = Address::generate(&env);
-        let beneficiary = Address::generate(&env);
-        let arbiter = Address::generate(&env);
-        let outsider = Address::generate(&env);
-
-        let issuer = Address::generate(&env);
-        let sac = env.register_stellar_asset_contract_v2(issuer);
-        let token_address = sac.address();
-        StellarAssetClient::new(&env, &token_address).mint(&depositor, &(AMOUNT * 10));
+    fn with_amount(with_arbiter: bool, amount: i128) -> Self {
+        let te = TestEnv::at(START_TS);
+        let (token, depositor) = te.make_token(
+            amount
+                .checked_mul(10)
+                .expect("test token mint amount remains in range"),
+        );
+        let token_address = token.address.clone();
+        let beneficiary = te.make_address();
+        let arbiter = te.make_address();
+        let outsider = te.make_address();
+        let env = te.env().clone();
 
         let contract_id = env.register(EscrowContract, ());
         let client = EscrowContractClient::new(&env, &contract_id);
@@ -62,7 +65,7 @@ impl Fixture<'_> {
                 None
             },
             &token_address,
-            &AMOUNT,
+            &amount,
             &DEADLINE,
         );
 
@@ -79,6 +82,12 @@ impl Fixture<'_> {
 
     fn funded(with_arbiter: bool) -> Self {
         let f = Fixture::new(with_arbiter);
+        f.client.fund();
+        f
+    }
+
+    fn funded_amount(amount: i128) -> Self {
+        let f = Fixture::with_amount(true, amount);
         f.client.fund();
         f
     }

@@ -3,11 +3,12 @@
 #![allow(clippy::arithmetic_side_effects)]
 
 use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
+    map,
+    testutils::{storage::Instance as _, Address as _, Events as _, Ledger as _},
     token::TokenClient,
-    Address, Env,
+    vec, Address, Env, Event, IntoVal, Symbol, Val,
 };
-use sororail_common::{testutils::TestEnv, Error};
+use sororail_common::{storage::INSTANCE_BUMP, testutils::TestEnv, Error};
 
 use crate::{
     contract::{VestingContract, VestingContractClient},
@@ -15,9 +16,11 @@ use crate::{
     types::Grant,
 };
 
+mod bump;
 mod claim;
 mod conservation;
 mod create;
+mod property;
 mod revoke;
 mod schedule;
 
@@ -41,11 +44,21 @@ impl Fixture<'_> {
     }
 
     fn with_schedule(revocable: bool, cliff: u64, duration: u64) -> Self {
-        let te = TestEnv::at(START);
+        Fixture::with_schedule_at(START, cliff, duration, revocable)
+    }
+
+    fn with_schedule_at(start: u64, cliff: u64, duration: u64, revocable: bool) -> Self {
+        Fixture::created_at(start, start, cliff, duration, revocable)
+    }
+
+    /// Creates the grant while the ledger reads `now`, which need not equal
+    /// the schedule's `start` (e.g. a retroactive grant with `start < now`).
+    fn created_at(now: u64, start: u64, cliff: u64, duration: u64, revocable: bool) -> Self {
+        let te = TestEnv::at(now);
         let (token, grantor) = te.make_token(MINT);
         let token_address = token.address.clone();
         let beneficiary = te.make_address();
-        let env = te.env;
+        let env = te.env().clone();
 
         let client = VestingContractClient::new(&env, &env.register(VestingContract, ()));
         client.create(
@@ -53,7 +66,7 @@ impl Fixture<'_> {
             &beneficiary,
             &token_address,
             &TOTAL,
-            &START,
+            &start,
             &cliff,
             &duration,
             &revocable,

@@ -1,7 +1,8 @@
-// --------------------------------------------------------------- release
+// release
 
 use super::*;
-use soroban_sdk::{testutils::Events as _, Event as _};
+
+// --------------------------------------------------------------- release
 
 #[test]
 fn release_pays_the_beneficiary() {
@@ -18,16 +19,18 @@ fn release_emits_released_event_with_correct_topics_and_data() {
     let f = Fixture::funded(true);
     f.client.release(&f.depositor);
 
-    let all = f.env.events().all().filter_by_contract(&f.client.address);
+    // `release` emits the token's own transfer event before its own
+    // `Released` (payment happens, then the event is published), so take
+    // the last event rather than assuming an exact count or index.
+    let all = f.env.events().all();
     let events = all.events();
-    // Released only (from the last invocation)
-    assert_eq!(events.len(), 1);
+    let last = events.last().expect("no events emitted");
     let expected = Released {
         beneficiary: f.beneficiary.clone(),
         amount: AMOUNT,
         released_by: f.depositor.clone(),
     };
-    assert_eq!(&events[0], &expected.to_xdr(&f.env, &f.client.address));
+    assert_eq!(last, &expected.to_xdr(&f.env, &f.client.address));
 }
 
 #[test]
@@ -73,4 +76,29 @@ fn release_rejects_a_closed_escrow() {
         f.client.try_release(&f.depositor),
         Err(Ok(Error::EscrowClosed))
     );
+}
+
+/// `release` must reject a disputed escrow with `EscrowNotFunded`: the
+/// arbiter owns the outcome once a dispute is open, so the beneficiary
+/// cannot be paid out from under it. The balance must stay in the contract.
+#[test]
+fn release_rejects_a_disputed_escrow() {
+    let f = Fixture::funded(true);
+    f.client.dispute(&f.depositor);
+    assert_eq!(
+        f.client.try_release(&f.arbiter),
+        Err(Ok(Error::EscrowNotFunded))
+    );
+    assert_eq!(f.client.state(), State::Disputed);
+    assert_eq!(f.escrow_balance(), AMOUNT);
+    assert_eq!(f.token.balance(&f.beneficiary), 0);
+}
+
+#[test]
+#[should_panic]
+fn release_requires_callers_authorization() {
+    let f = Fixture::funded(true);
+    // Clear auths so require_auth bites.
+    f.env.set_auths(&[]);
+    f.client.release(&f.depositor);
 }
