@@ -6,7 +6,7 @@ use soroban_sdk::{
     map,
     testutils::{Address as _, Events as _, Ledger as _},
     token::TokenClient,
-    vec, Address, Env, IntoVal, Symbol, Val,
+    vec, Address, Env, Event as _, IntoVal, Symbol, Val,
 };
 use sororail_common::{testutils::TestEnv, Error};
 
@@ -172,15 +172,15 @@ fn accrual_reports_overflow_rather_than_wrapping() {
 fn available_at_errors_if_withdrawn_exceeds_accrued() {
     let env = Env::default();
     let mut s = bare(&env);
-    // Accrued at START+10 is RATE*10; force withdrawn past that.
-    s.withdrawn = RATE * 10 + 1;
+    // Force a genuine checked-subtraction overflow at `START + 10`.
+    s.withdrawn = i128::MIN;
     assert_eq!(
         s.available_at(START + 10),
         Err(Error::Underflow),
         "available_at must error rather than wrap when withdrawn > accrued"
     );
     // Even after full accrual, an over-withdrawn book still errors.
-    s.withdrawn = DEPOSITED + 1;
+    s.withdrawn = i128::MIN;
     assert_eq!(s.available_at(STOP), Err(Error::Underflow));
 }
 
@@ -203,7 +203,8 @@ fn create_funds_the_whole_span_up_front() {
 #[test]
 fn create_emits_the_created_event() {
     let f = Fixture::new(true);
-    let events = f.env.events().all();
+    let all = f.env.events().all().filter_by_contract(&f.client.address);
+    let events = all.events();
     assert_eq!(events.len(), 1);
     let expected = Created {
         sender: f.sender.clone(),
@@ -215,7 +216,7 @@ fn create_emits_the_created_event() {
         cancellable: true,
         deposited: DEPOSITED,
     };
-    assert_eq!(&events[0], &expected);
+    assert_eq!(&events[0], &expected.to_xdr(&f.env, &f.client.address));
 }
 
 #[test]
@@ -286,7 +287,7 @@ fn create_allows_the_exact_max_funding_boundary() {
     let (token_client, sender) = te.make_token(i128::MAX);
     let token = token_client.address.clone();
     let recipient = te.make_address();
-    let env = te.env;
+    let env = te.env.clone();
     let c = StreamContractClient::new(&env, &env.register(StreamContract, ()));
 
     c.create(
@@ -350,7 +351,7 @@ fn create_reverts_cleanly_when_sender_cannot_fund() {
     let (token_client, sender) = te.make_token(RATE);
     let token = token_client.address.clone();
     let recipient = te.make_address();
-    let env = te.env;
+    let env = te.env.clone();
     let c = StreamContractClient::new(&env, &env.register(StreamContract, ()));
 
     assert!(c
@@ -408,15 +409,15 @@ fn withdraw_emits_the_withdrawn_event() {
     f.at(START + 300);
     f.client.withdraw(&None);
 
-    let events = f.env.events().all();
-    // Created + Withdrawn
-    assert_eq!(events.len(), 2);
+    let all = f.env.events().all().filter_by_contract(&f.client.address);
+    let events = all.events();
+    assert_eq!(events.len(), 1);
     let expected = Withdrawn {
         recipient: f.recipient.clone(),
         amount: RATE * 300,
         total_withdrawn: RATE * 300,
     };
-    assert_eq!(&events[1], &expected);
+    assert_eq!(&events[0], &expected.to_xdr(&f.env, &f.client.address));
 }
 
 #[test]
@@ -530,16 +531,16 @@ fn cancel_emits_the_cancelled_event() {
     f.at(START + 400);
     f.client.cancel();
 
-    let events = f.env.events().all();
-    // Created + Cancelled
-    assert_eq!(events.len(), 2);
+    let all = f.env.events().all().filter_by_contract(&f.client.address);
+    let events = all.events();
+    assert_eq!(events.len(), 1);
     let expected = Cancelled {
         sender: f.sender.clone(),
         settled_to_recipient: RATE * 400,
         refunded_to_sender: DEPOSITED - RATE * 400,
         cancelled_at: START + 400,
     };
-    assert_eq!(&events[1], &expected);
+    assert_eq!(&events[0], &expected.to_xdr(&f.env, &f.client.address));
 }
 
 #[test]

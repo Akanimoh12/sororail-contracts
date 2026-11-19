@@ -376,7 +376,6 @@ fn charge_fails_when_allowance_covers_fewer_periods_than_remain() {
     assert_eq!(f.client.get().periods_charged, 2);
 }
 
-
 /// `charge` bumps `periods_charged` before `transfer_from`. A failed token
 /// call must roll that write back — `get()` still shows the pre-charge count.
 #[test]

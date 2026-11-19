@@ -3,9 +3,9 @@
 #![allow(clippy::arithmetic_side_effects)]
 
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Events as _},
     token::{StellarAssetClient, TokenClient},
-    vec, Address, Env, Vec,
+    vec, Address, Env, Event as _, Vec,
 };
 use sororail_common::Error;
 
@@ -88,6 +88,9 @@ fn execute_pays_each_recipient_their_own_amount() {
     ];
 
     let receipt = f.client.execute(&f.funder, &f.token.address, &batch);
+    let all = f.env.events().all().filter_by_contract(&f.client.address);
+    let events = all.events();
+
     assert_eq!(
         receipt,
         Receipt {
@@ -102,17 +105,14 @@ fn execute_pays_each_recipient_their_own_amount() {
     // The contract is a conduit; it holds nothing.
     assert_eq!(f.token.balance(&f.client.address), 0);
 
-    let events = f.env.events().all();
-    assert_eq!(events.len(), 1);
-
-    let executed_event = &events[0];
     let expected = Executed {
         funder: f.funder.clone(),
         token: f.token.address.clone(),
         count: 3,
         total: 357,
     };
-    assert_eq!(executed_event, &expected);
+    assert_eq!(events.len(), 1);
+    assert_eq!(&events[0], &expected.to_xdr(&f.env, &f.client.address));
 }
 
 #[test]
@@ -211,7 +211,6 @@ fn a_batch_the_funder_cannot_afford_pays_nobody() {
     assert_eq!(f.token.balance(&b), 0);
     assert_eq!(f.token.balance(&f.funder), MINT);
 }
-
 
 /// Same host-revert guarantee as the other contracts: a failed mid-batch
 /// transfer leaves no partial mutation (batch_payout is otherwise stateless).

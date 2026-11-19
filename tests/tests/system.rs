@@ -287,10 +287,12 @@ fn cannot_cancel_non_cancellable_stream() {
 
     // Attempt to cancel the stream and assert the error
     let result = s.stream.try_cancel();
-    assert_eq!(result, Err(Ok(sororail_common::Error::StreamNotCancellable)));
+    assert_eq!(
+        result,
+        Err(Ok(sororail_common::Error::StreamNotCancellable))
+    );
     s.assert_nothing_lost(&parties);
 }
-
 
 /// Cancelling and revoking in the same window returns exactly the unearned
 /// portion of each, and nothing more.
@@ -476,7 +478,8 @@ fn batch_and_recurring_payroll_workflow() {
             amount: 200_000,
         },
     ];
-    s.batch.execute(&s.employer, &s.token.address, &bonus_payroll);
+    s.batch
+        .execute(&s.employer, &s.token.address, &bonus_payroll);
     s.recurring.charge();
     assert_eq!(s.balance(&vendor), 200_000);
     s.assert_nothing_lost(&parties);
