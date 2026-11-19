@@ -43,6 +43,12 @@ fn charge_one_period(
         &amount,
     );
 
+    // Apply pending amount if one was scheduled.
+    if let Some(pending) = authorization.pending_amount_per_period.take() {
+        authorization.amount_per_period = pending;
+        storage::save(env, &authorization);
+    }
+
     events::Charged {
         payee: authorization.payee.clone(),
         payer: authorization.payer.clone(),
@@ -82,6 +88,7 @@ impl RecurringContract {
         amount_per_period: i128,
         period_seconds: u64,
         max_periods: Option<u32>,
+        valid_until: Option<u64>,
     ) -> Result<(), Error> {
         if storage::is_initialized(&env) {
             return Err(Error::AlreadyInitialized);
@@ -115,6 +122,9 @@ impl RecurringContract {
             periods_charged: 0,
             next_chargeable_at: first_chargeable_at,
             cancelled: false,
+            valid_until,
+            max_amount: None,
+            pending_amount_per_period: None,
         };
         storage::save(&env, &authorization);
 
@@ -126,6 +136,7 @@ impl RecurringContract {
             period_seconds,
             max_periods,
             first_chargeable_at,
+            valid_until,
         }
         .publish(&env);
         Ok(())
@@ -154,6 +165,11 @@ impl RecurringContract {
         let now = env.ledger().timestamp();
         if now < authorization.next_chargeable_at {
             return Err(Error::RecurringPeriodNotElapsed);
+        }
+        if let Some(until) = authorization.valid_until {
+            if now >= until {
+                return Err(Error::RecurringExhausted);
+            }
         }
 
         charge_one_period(&env, &mut authorization, now, true)
@@ -187,18 +203,55 @@ impl RecurringContract {
         if now < authorization.next_chargeable_at {
             return Err(Error::RecurringPeriodNotElapsed);
         }
+        if let Some(until) = authorization.valid_until {
+            if now >= until {
+                return Err(Error::RecurringExhausted);
+            }
+        }
 
         let mut total = 0i128;
         let mut charged = 0u32;
         while charged < max_periods
             && now >= authorization.next_chargeable_at
             && !authorization.is_exhausted()
+            && authorization.valid_until.map_or(true, |until| authorization.next_chargeable_at < until)
         {
             let amount = charge_one_period(&env, &mut authorization, now, false)?;
             total = math::add(total, amount)?;
             charged = charged.checked_add(1).ok_or(Error::Overflow)?;
         }
         Ok(total)
+    }
+
+    /// Updates the amount per period, effective from the next period.
+    ///
+    /// Requires payer authorization. The in-flight period (the one ready to
+    /// charge but not yet charged) uses the old amount; the update applies
+    /// starting from the charge after that.
+    ///
+    /// If `max_amount` was set, the new amount cannot exceed it.
+    pub fn update_amount(env: Env, new_amount: i128) -> Result<(), Error> {
+        let mut authorization = storage::load(&env)?;
+        authorization.payer.require_auth();
+
+        math::require_positive(new_amount)?;
+        if let Some(max) = authorization.max_amount {
+            if new_amount > max {
+                return Err(Error::InvalidAmount);
+            }
+        }
+
+        let old_amount = authorization.amount_per_period;
+        authorization.pending_amount_per_period = Some(new_amount);
+        storage::save(&env, &authorization);
+
+        events::AmountUpdated {
+            old_amount,
+            new_amount,
+            effective_from: authorization.next_chargeable_at + authorization.period_seconds,
+        }
+        .publish(&env);
+        Ok(())
     }
 
     /// Cancels the authorization, effective immediately.

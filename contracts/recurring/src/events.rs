@@ -16,6 +16,7 @@ pub struct Authorized {
     pub period_seconds: u64,
     pub max_periods: Option<u32>,
     pub first_chargeable_at: u64,
+    pub valid_until: Option<u64>,
 }
 
 /// The payee pulled one period's payment.
@@ -44,4 +45,14 @@ pub struct Cancelled {
     pub cancelled_by: Address,
     pub periods_charged: u32,
     pub cancelled_at: u64,
+}
+
+/// The payer updated the amount per period.
+#[contractevent(topics = ["recurring", "amount_updated"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AmountUpdated {
+    pub old_amount: i128,
+    pub new_amount: i128,
+    /// The timestamp at which the new amount becomes effective.
+    pub effective_from: u64,
 }
