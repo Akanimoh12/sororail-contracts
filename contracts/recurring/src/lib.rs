@@ -10,10 +10,11 @@ with `approve`, and each `charge` moves money directly from payer to payee via
 `transfer_from`. Revoking that allowance stops charges immediately, with or
 without cancelling here.
 
-**Skipped periods are forfeited, not banked.** The next charge is scheduled at
-`now + period_seconds` each time, so a payee who forgets to charge for three
-months cannot then take three payments at once. That is a deliberate
-consumer-protection choice.
+`charge` pulls one payment and schedules the next at `now + period_seconds`,
+so skipped periods are forfeited. `charge_up_to(max_periods)` is an explicit
+catch-up option: it pulls only periods whose scheduled timestamps have elapsed,
+up to the caller's limit and the authorization's remaining cap. The first
+payment is never available until one full period after authorization.
 
 ## Entry points
 
@@ -21,6 +22,7 @@ consumer-protection choice.
 |---|---|---|
 | `authorize` | payer | Records the cap and cadence. Requires payer auth. |
 | `charge` | payee | Pulls one period's amount from payer to payee via `transfer_from`. |
+| `charge_up_to` | payee | Pulls up to the requested number of elapsed periods. |
 | `cancel` | payer or payee | Stops future charges. Revoking the token allowance also stops them. |
 | `next_chargeable_at`, `is_chargeable`, `remaining_periods` | anyone | Reads the schedule and what is still allowed. |
 | `bump`, `get` | anyone | Extends TTL; reads the full authorization record. |

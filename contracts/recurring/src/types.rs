@@ -13,10 +13,10 @@ use sororail_common::math;
 ///
 /// # Periods never accrue retroactively
 ///
-/// `next_chargeable_at` is set to `now + period_seconds` at each charge --
-/// **not** advanced by one period from its previous value. A payee who forgets
-/// to charge for three months therefore cannot then charge three times; the
-/// skipped periods are simply gone.
+/// `charge` sets `next_chargeable_at` to `now + period_seconds`, forfeiting
+/// skipped periods. `charge_up_to` instead advances from the stored due date
+/// for each elapsed period, with an explicit per-call limit. Neither entry
+/// point allows a payment before the first full period after authorization.
 ///
 /// This is a deliberate consumer-protection choice, not an oversight. It costs
 /// the payee the revenue of periods they did not collect, and it guarantees
