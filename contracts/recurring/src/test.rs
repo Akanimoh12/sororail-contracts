@@ -334,6 +334,69 @@ fn charge_cannot_be_taken_twice_in_one_period() {
     assert_eq!(f.token.balance(&f.payee), AMOUNT);
 }
 
+/// Issue #478: double charging within one period is the highest-impact
+/// failure for a subscription contract. The second `charge` in the same
+/// period must fail with `RecurringPeriodNotElapsed` and leave every balance,
+/// the allowance and the schedule exactly as the first charge left them --
+/// including at the exact boundary second of both the first and next period.
+#[test]
+fn charge_twice_in_the_same_period_fails_and_leaves_balances_unchanged() {
+    let f = Fixture::new(None);
+    let snapshot = |f: &Fixture| {
+        (
+            f.token.balance(&f.payer),
+            f.token.balance(&f.payee),
+            f.token.balance(&f.client.address),
+            f.token.allowance(&f.payer, &f.client.address),
+            f.client.get(),
+        )
+    };
+
+    // One second before the first boundary: not yet chargeable.
+    f.at(START + PERIOD - 1);
+    assert_eq!(
+        f.client.try_charge(),
+        Err(Ok(Error::RecurringPeriodNotElapsed))
+    );
+
+    // Exactly at the boundary second the first charge goes through.
+    f.at(START + PERIOD);
+    assert_eq!(f.client.charge(), AMOUNT);
+    let after_first = snapshot(&f);
+    assert_eq!(after_first.0, MINT - AMOUNT);
+    assert_eq!(after_first.1, AMOUNT);
+    assert_eq!(after_first.4.periods_charged, 1);
+    assert_eq!(after_first.4.next_chargeable_at, START + PERIOD * 2);
+
+    // A second charge in that same boundary second is refused...
+    assert_eq!(
+        f.client.try_charge(),
+        Err(Ok(Error::RecurringPeriodNotElapsed))
+    );
+    assert_eq!(snapshot(&f), after_first);
+
+    // ...and so is one at the last second of the period.
+    f.at(START + PERIOD * 2 - 1);
+    assert_eq!(
+        f.client.try_charge(),
+        Err(Ok(Error::RecurringPeriodNotElapsed))
+    );
+    assert_eq!(snapshot(&f), after_first);
+
+    // At the next boundary second exactly one more charge is allowed.
+    f.at(START + PERIOD * 2);
+    assert_eq!(f.client.charge(), AMOUNT);
+    let after_second = snapshot(&f);
+    assert_eq!(after_second.0, MINT - AMOUNT * 2);
+    assert_eq!(after_second.1, AMOUNT * 2);
+    assert_eq!(after_second.4.periods_charged, 2);
+    assert_eq!(
+        f.client.try_charge(),
+        Err(Ok(Error::RecurringPeriodNotElapsed))
+    );
+    assert_eq!(snapshot(&f), after_second);
+}
+
 #[test]
 fn skipped_periods_are_forfeited_not_banked() {
     // The consumer-protection property. A payee who forgets for three periods

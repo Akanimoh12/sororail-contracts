@@ -929,6 +929,159 @@ fn resolve_endpoints_pay_one_side_in_full() {
     assert_eq!(g.token.balance(&g.beneficiary), 0);
 }
 
+// Issue #476: boundary splits with a token that rejects zero-value transfers.
+//
+// The Stellar Asset Contract happily accepts a transfer of 0, so the tests
+// above cannot tell whether `resolve` skips the empty side of a 0 or 10_000
+// bps split. Some tokens are stricter and trap on a zero amount; against one
+// of those, an unconditional `pay` of the empty share would abort the whole
+// resolution and strand the funds. `StrictToken` is a minimal token that
+// panics on any non-positive transfer, so both boundaries must pay exactly one
+// side, leave no dust, and never attempt a zero transfer.
+mod strict_token {
+    use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+
+    #[contracttype]
+    enum DataKey {
+        Balance(Address),
+        Transfers,
+    }
+
+    #[contract]
+    pub struct StrictToken;
+
+    #[contractimpl]
+    impl StrictToken {
+        pub fn mint(env: Env, to: Address, amount: i128) {
+            let balance = Self::balance(env.clone(), to.clone());
+            let updated = balance.checked_add(amount).expect("mint overflow");
+            env.storage()
+                .persistent()
+                .set(&DataKey::Balance(to), &updated);
+        }
+
+        pub fn balance(env: Env, id: Address) -> i128 {
+            env.storage()
+                .persistent()
+                .get(&DataKey::Balance(id))
+                .unwrap_or(0)
+        }
+
+        /// Number of successful transfers, so tests can count exactly how many
+        /// payments a call made.
+        pub fn transfers(env: Env) -> u32 {
+            env.storage()
+                .instance()
+                .get(&DataKey::Transfers)
+                .unwrap_or(0)
+        }
+
+        pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+            assert!(amount > 0, "strict token: zero-value transfer rejected");
+            from.require_auth();
+            let from_balance = Self::balance(env.clone(), from.clone());
+            let from_after = from_balance
+                .checked_sub(amount)
+                .filter(|b| *b >= 0)
+                .expect("strict token: insufficient balance");
+            env.storage()
+                .persistent()
+                .set(&DataKey::Balance(from), &from_after);
+            let to_after = Self::balance(env.clone(), to.clone())
+                .checked_add(amount)
+                .expect("strict token: balance overflow");
+            env.storage()
+                .persistent()
+                .set(&DataKey::Balance(to), &to_after);
+            let count = Self::transfers(env.clone())
+                .checked_add(1)
+                .expect("transfer count overflow");
+            env.storage().instance().set(&DataKey::Transfers, &count);
+        }
+    }
+}
+
+use strict_token::{StrictToken, StrictTokenClient};
+
+/// A funded, disputed escrow whose token is `StrictToken`.
+fn disputed_with_strict_token(
+    env: &Env,
+) -> (
+    EscrowContractClient<'_>,
+    StrictTokenClient<'_>,
+    Address,
+    Address,
+) {
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.timestamp = START_TS);
+    let token = StrictTokenClient::new(env, &env.register(StrictToken, ()));
+    let depositor = Address::generate(env);
+    let beneficiary = Address::generate(env);
+    let arbiter = Address::generate(env);
+    token.mint(&depositor, &AMOUNT);
+
+    let client = EscrowContractClient::new(env, &env.register(EscrowContract, ()));
+    client.init(
+        &depositor,
+        &beneficiary,
+        &Some(arbiter),
+        &token.address,
+        &AMOUNT,
+        &DEADLINE,
+    );
+    client.fund();
+    client.dispute(&depositor);
+    (client, token, depositor, beneficiary)
+}
+
+#[test]
+fn strict_token_rejects_a_zero_value_transfer() {
+    // Sanity-check the mock itself: without this, the boundary tests below
+    // would pass vacuously if the mock silently accepted zero.
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = StrictTokenClient::new(&env, &env.register(StrictToken, ()));
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    token.mint(&a, &10);
+    assert!(token.try_transfer(&a, &b, &0).is_err());
+    assert_eq!(token.balance(&a), 10);
+    assert_eq!(token.transfers(), 0);
+}
+
+#[test]
+fn resolve_at_zero_bps_pays_only_the_depositor_with_a_strict_token() {
+    let env = Env::default();
+    let (client, token, depositor, beneficiary) = disputed_with_strict_token(&env);
+    // `fund` was the only transfer so far.
+    assert_eq!(token.transfers(), 1);
+
+    client.resolve(&0);
+
+    assert_eq!(token.balance(&depositor), AMOUNT);
+    assert_eq!(token.balance(&beneficiary), 0);
+    assert_eq!(token.balance(&client.address), 0, "dust left in escrow");
+    // Exactly one payout: the empty beneficiary share was skipped.
+    assert_eq!(token.transfers(), 2);
+    assert_eq!(client.state(), State::Resolved);
+}
+
+#[test]
+fn resolve_at_ten_thousand_bps_pays_only_the_beneficiary_with_a_strict_token() {
+    let env = Env::default();
+    let (client, token, depositor, beneficiary) = disputed_with_strict_token(&env);
+    assert_eq!(token.transfers(), 1);
+
+    client.resolve(&10_000);
+
+    assert_eq!(token.balance(&beneficiary), AMOUNT);
+    assert_eq!(token.balance(&depositor), 0);
+    assert_eq!(token.balance(&client.address), 0, "dust left in escrow");
+    // Exactly one payout: the empty depositor share was skipped.
+    assert_eq!(token.transfers(), 2);
+    assert_eq!(client.state(), State::Resolved);
+}
+
 #[test]
 fn resolve_conserves_the_escrowed_amount_at_every_split() {
     // The invariant: paid_to_beneficiary + paid_to_depositor == amount,
